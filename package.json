@@ -12,7 +12,7 @@
     "@auth/mongodb-adapter": "^3.11.1",
     "@langchain/google-genai": "^2.1.13",
     "langchain": "^1.2.14",
-    "mongodb": "^7.0.0",
+    "mongodb": "^6.21.0",
     "mongoose": "^9.1.5",
     "next": "^16.1.6",
     "next-auth": "^5.0.0-beta.29",
