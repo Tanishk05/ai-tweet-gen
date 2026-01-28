@@ -1,7 +1,7 @@
-import { NextRequest, NextResponse } from "next/server";
+import { NextResponse } from "next/server";
 import { fetchTweets } from "@/app/actions";
 
-export async function GET(req: NextRequest) {
+export async function GET() {
   try {
     const tweets = await fetchTweets();
     return NextResponse.json(tweets);

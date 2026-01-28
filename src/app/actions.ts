@@ -7,6 +7,7 @@ import { auth } from "@/auth";
 import { z } from "zod";
 import { ChatGoogleGenerativeAI } from "@langchain/google-genai";
 import { redirect } from "next/navigation";
+import { Types } from "mongoose";
 
 /* ============================
    Onboarding
@@ -18,7 +19,7 @@ const OnboardingSchema = z.object({
 
 export async function updateUserOnboarding(
   prevState: unknown,
-  formData: FormData
+  formData: FormData,
 ) {
   const session = await auth();
   if (!session?.user?.id) return { error: "Not authenticated" };
@@ -30,22 +31,15 @@ export async function updateUserOnboarding(
 
   if (!validated.success) return { error: "Invalid data" };
 
-  const { user_type, profession } = validated.data;
-
   try {
     await dbConnect();
-    await User.findByIdAndUpdate(
-      session.user.id,
-      { user_type, profession },
-      { new: true }
-    );
+    await User.findByIdAndUpdate(session.user.id, validated.data);
   } catch (err) {
     console.error(err);
     return { error: "Failed to update user" };
   }
 
   redirect("/home");
-  return { error: null };
 }
 
 /* ============================
@@ -59,37 +53,44 @@ async function getAIHistory(userId: string, limit = 20) {
     .sort({ createdAt: -1 })
     .limit(limit)
     .lean();
+
   return history.reverse();
 }
 
 async function generateAITweet(userId: string) {
   const history = (await getAIHistory(userId)).map(
-    (h) => `${h.type.toUpperCase()}: ${h.content}`
+    (h) => `${h.type.toUpperCase()}: ${h.content}`,
   );
+
   const llm = new ChatGoogleGenerativeAI({
     model: "gemini-2.5-pro",
     temperature: 0.8,
   });
+
   const res = await llm.invoke(
-    [...history, `Generate a casual tweet about your profession`].join("\n")
+    [...history, "Generate a casual tweet about your profession"].join("\n"),
   );
+
   return res.content as string;
 }
 
 export async function generateAIReply(comment: string, userId: string) {
   const history = (await getAIHistory(userId)).map(
-    (h) => `${h.type.toUpperCase()}: ${h.content}`
+    (h) => `${h.type.toUpperCase()}: ${h.content}`,
   );
+
   const llm = new ChatGoogleGenerativeAI({
     model: "gemini-2.5-pro",
     temperature: 0.7,
   });
+
   const res = await llm.invoke(
     [
       ...history,
-      `Someone commented: "${comment}". Write a reply to this comment as you are the original tweet's author. Don't give options just a single reply.`,
-    ].join("\n")
+      `Someone commented: "${comment}". Write a single reply as the original author.`,
+    ].join("\n"),
   );
+
   return res.content as string;
 }
 
@@ -103,9 +104,8 @@ export async function postTweet(formData: FormData) {
   const validated = TweetSchema.safeParse({
     content: formData.get("content") ?? "",
   });
-  if (!validated.success) return { error: "Invalid tweet" };
 
-  const { content } = validated.data;
+  if (!validated.success) return { error: "Invalid tweet" };
 
   await dbConnect();
   const user = await User.findById(session.user.id);
@@ -114,10 +114,24 @@ export async function postTweet(formData: FormData) {
   const finalTweet =
     user.user_type === "ai"
       ? await generateAITweet(user._id.toString())
-      : content;
-  await Tweet.create({ user: user._id, content: finalTweet, type: "tweet" });
+      : validated.data.content;
 
-  return { success: true, tweet: finalTweet };
+  const tweet = await Tweet.create({
+    user: user._id,
+    content: finalTweet,
+    type: "tweet",
+  });
+
+  return {
+    success: true,
+    tweet: {
+      _id: tweet._id.toString(),
+      user: tweet.user.toString(),
+      content: tweet.content,
+      type: tweet.type,
+      createdAt: tweet.createdAt.toISOString(),
+    },
+  };
 }
 
 /* ============================
@@ -126,35 +140,80 @@ export async function postTweet(formData: FormData) {
 export async function postComment(
   tweetId: string,
   comment: string,
-  userId: string
+  userId: string,
 ) {
   await dbConnect();
 
-  const newComment = await Tweet.create({
+  await Tweet.create({
     user: userId,
     content: comment,
     type: "comment",
     parentTweet: tweetId,
   });
+
   const parentTweet = await Tweet.findById(tweetId);
   if (!parentTweet) return { error: "Parent tweet not found" };
 
   const tweetOwner = await User.findById(parentTweet.user);
+
   if (tweetOwner?.user_type === "ai") {
     const replyContent = await generateAIReply(
       comment,
-      tweetOwner._id.toString()
+      tweetOwner._id.toString(),
     );
+
     await Tweet.create({
       user: tweetOwner._id,
       content: replyContent,
       type: "reply",
       parentTweet: parentTweet._id,
     });
+
     return { success: true, reply: replyContent };
   }
 
   return { success: true };
+}
+
+/* ============================
+   Types
+============================ */
+export type LeanUser = {
+  _id: Types.ObjectId;
+  name: string;
+  email: string;
+  image?: string;
+  user_type: "ai" | "human";
+  profession?: string;
+  createdAt: Date;
+  updatedAt: Date;
+};
+
+export type LeanTweet = {
+  _id: Types.ObjectId;
+  content: string;
+  type: "tweet" | "comment" | "reply";
+  user: LeanUser | Types.ObjectId;
+  parentTweet?: Types.ObjectId;
+  createdAt: Date;
+  updatedAt: Date;
+};
+
+/* ============================
+   Serializer
+============================ */
+function serializeDoc(doc: LeanTweet) {
+  return {
+    ...doc,
+    _id: doc._id.toString(),
+    user:
+      typeof doc.user === "object" && "_id" in doc.user
+        ? { ...doc.user, _id: doc.user._id.toString() }
+        : (doc.user as Types.ObjectId).toString(),
+    parentTweet: doc.parentTweet?.toString(),
+    createdAt: doc.createdAt.toISOString(),
+    updatedAt: doc.updatedAt.toISOString(),
+  };
 }
 
 /* ============================
@@ -163,21 +222,23 @@ export async function postComment(
 export async function fetchTweets() {
   await dbConnect();
 
-  // Fetch all main tweets
   const tweets = await Tweet.find({ type: "tweet" })
     .populate("user")
     .sort({ createdAt: -1 })
-    .lean();
+    .lean<LeanTweet[]>();
 
-  // For each tweet, fetch its comments separately
   const tweetsWithComments = await Promise.all(
     tweets.map(async (t) => {
       const comments = await Tweet.find({ parentTweet: t._id })
         .populate("user")
-        .sort({ createdAt: 1 }) // oldest first
-        .lean();
-      return { ...t, comments };
-    })
+        .sort({ createdAt: 1 })
+        .lean<LeanTweet[]>();
+
+      return {
+        ...serializeDoc(t),
+        comments: comments.map(serializeDoc),
+      };
+    }),
   );
 
   return tweetsWithComments;

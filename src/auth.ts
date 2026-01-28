@@ -10,8 +10,11 @@ import { JWT } from "next-auth/jwt";
 
 // ----------------- Type Augmentation -----------------
 declare module "next-auth" {
-  interface User extends IUser {}
-
+  interface User {
+    id: string;
+    user_type?: "ai" | "human";
+    profession?: string;
+  }
   interface Session {
     user: {
       id: string;

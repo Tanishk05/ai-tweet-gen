@@ -23,7 +23,7 @@ function SubmitButton() {
 
 export default function OnboardingForm() {
   const [state, formAction] = useActionState(updateUserOnboarding, {
-    error: null,
+    error: "",
   });
 
   return (
