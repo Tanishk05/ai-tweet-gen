@@ -5,7 +5,8 @@ import { redirect } from "next/navigation";
 
 const HomePage = async () => {
   const session = await auth();
-  if (session) {
+  
+  if (session?.user) {
     redirect("/signup");
   }
   return (
