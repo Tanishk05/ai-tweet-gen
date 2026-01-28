@@ -34,6 +34,7 @@ declare module "next-auth/jwt" {
 
 // ----------------- NextAuth Config -----------------
 export const { handlers, signIn, signOut, auth } = NextAuth({
+  trustHost: true,
   adapter: MongoDBAdapter(clientPromise),
   session: { strategy: "jwt" },
   providers: [
